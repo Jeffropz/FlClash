@@ -15,11 +15,10 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::Globalization::lstrcmpW;
 use windows_sys::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, CreateFontW, DeleteDC, DeleteObject, DrawTextW, GdiFlush,
-    GetDC, GetMonitorInfoW, MonitorFromWindow, ReleaseDC, SelectObject, SetBkMode, SetTextColor,
-    ValidateRect, AC_SRC_ALPHA, AC_SRC_OVER, ANTIALIASED_QUALITY, BITMAPINFO, BITMAPINFOHEADER,
-    BI_RGB, BLENDFUNCTION, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DIB_RGB_COLORS,
-    DT_NOPREFIX, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, MONITORINFO,
-    MONITOR_DEFAULTTONEAREST, OUT_DEFAULT_PRECIS, TRANSPARENT,
+    GetDC, ReleaseDC, SelectObject, SetBkMode, SetTextColor, ValidateRect, AC_SRC_ALPHA,
+    AC_SRC_OVER, ANTIALIASED_QUALITY, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION,
+    CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DIB_RGB_COLORS, DT_NOPREFIX, DT_RIGHT,
+    DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, OUT_DEFAULT_PRECIS, TRANSPARENT,
 };
 use windows_sys::Win32::System::LibraryLoader::{
     GetModuleHandleW, GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_SYSTEM32,
@@ -33,14 +32,14 @@ use windows_sys::Win32::UI::Shell::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu,
-    DispatchMessageW, FindWindowExW, FindWindowW, GetClassNameW, GetCursorPos, GetForegroundWindow,
-    GetMessageW, GetSystemMetrics, GetWindowRect, IsWindowVisible, KillTimer, LoadImageW,
-    PostMessageW, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, SetTimer,
-    ShowWindow, TrackPopupMenu, TranslateMessage, UpdateLayeredWindow, HICON, HMENU, IMAGE_ICON,
-    LR_LOADFROMFILE, MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG,
-    PBT_APMRESUMEAUTOMATIC, PBT_APMRESUMESUSPEND, SM_CXSMICON, SM_CYSCREEN, SM_CYSMICON, SW_HIDE,
-    SW_SHOWNOACTIVATE, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, ULW_ALPHA,
-    WM_APP, WM_ERASEBKGND, WM_LBUTTONUP, WM_NULL, WM_PAINT, WM_POWERBROADCAST, WM_RBUTTONUP,
+    DispatchMessageW, FindWindowExW, FindWindowW, GetCursorPos, GetMessageW, GetSystemMetrics,
+    GetWindowRect, IsWindowVisible, KillTimer, LoadImageW, PostMessageW, RegisterClassW,
+    RegisterWindowMessageW, SetForegroundWindow, SetTimer, ShowWindow, TrackPopupMenu,
+    TranslateMessage, UpdateLayeredWindow, HICON, HMENU, IMAGE_ICON, LR_LOADFROMFILE, MF_CHECKED,
+    MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, PBT_APMRESUMEAUTOMATIC,
+    PBT_APMRESUMESUSPEND, SM_CXSMICON, SM_CYSCREEN, SM_CYSMICON, SW_HIDE, SW_SHOWNOACTIVATE,
+    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, ULW_ALPHA, WM_APP,
+    WM_ERASEBKGND, WM_LBUTTONUP, WM_NULL, WM_PAINT, WM_POWERBROADCAST, WM_RBUTTONUP,
     WM_SETTINGCHANGE, WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     WS_EX_TOPMOST, WS_OVERLAPPED, WS_POPUP,
 };
@@ -383,9 +382,6 @@ struct TitleLayout {
 }
 
 fn title_layout() -> Option<TitleLayout> {
-    if foreground_covers_monitor() {
-        return None;
-    }
     let taskbar = unsafe { FindWindowW(wide("Shell_TrayWnd").as_ptr(), null()) };
     if taskbar.is_null() {
         return None;
@@ -429,45 +425,6 @@ fn title_layout() -> Option<TitleLayout> {
         height,
         dpi,
     })
-}
-
-fn foreground_covers_monitor() -> bool {
-    unsafe {
-        let foreground = GetForegroundWindow();
-        if foreground.is_null() || is_shell_window(foreground) {
-            return false;
-        }
-        let monitor = MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST);
-        if monitor.is_null() {
-            return false;
-        }
-        let mut info: MONITORINFO = zeroed();
-        info.cbSize = size_of::<MONITORINFO>() as u32;
-        if GetMonitorInfoW(monitor, &mut info) == 0 {
-            return false;
-        }
-        let mut rect: RECT = zeroed();
-        if GetWindowRect(foreground, &mut rect) == 0 {
-            return false;
-        }
-        rect.left <= info.rcMonitor.left
-            && rect.top <= info.rcMonitor.top
-            && rect.right >= info.rcMonitor.right
-            && rect.bottom >= info.rcMonitor.bottom
-    }
-}
-
-fn is_shell_window(window: HWND) -> bool {
-    let mut class = [0u16; 64];
-    let len = unsafe { GetClassNameW(window, class.as_mut_ptr(), class.len() as i32) };
-    if len <= 0 {
-        return false;
-    }
-    let class = String::from_utf16_lossy(&class[..len as usize]);
-    matches!(
-        class.as_str(),
-        "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd"
-    )
 }
 
 fn render_title(window: HWND, title: &str, layout: &TitleLayout) -> bool {

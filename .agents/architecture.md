@@ -2063,8 +2063,8 @@ UTF-8 bytes rather than a `String` so that decoding them stays off the UI isolat
   top-level window on a `tray` thread, which gets `TaskbarCreated`, resume broadcasts and its retry timer there and
   runs `TrackPopupMenu`; `show` and `hide` call `Shell_NotifyIconW` on the caller's thread so that a hide before
   `exit` has landed. Windows draws the speed title into a separate layered, no-activate top-level window anchored
-  left of `TrayNotifyWnd`, kept in place by a one-second timer and hidden while a foreground window covers its
-  monitor. Linux exports a StatusNotifierItem and its dbusmenu over D-Bus with `ksni`, on a `tray` thread
+  left of `TrayNotifyWnd`, kept in place by a one-second timer and hidden with the taskbar. Linux exports a
+  StatusNotifierItem and its dbusmenu over D-Bus with `ksni`, on a `tray` thread
   with a current-thread tokio runtime, so it needs neither GTK nor libappindicator: a left click is
   `TrayIconActivated`, the host shows the menu on a right click, and GNOME shows the item only with the AppIndicator
   extension.

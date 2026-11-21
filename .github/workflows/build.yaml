@@ -72,6 +72,10 @@ jobs:
         run: |
           yq -i '.hooks.user_defines.setup.build_assets = false' pubspec.yaml
 
+      - name: Fetch upstream release tags
+        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && github.repository != 'chen08209/FlClash'
+        run: git fetch --tags https://github.com/chen08209/FlClash.git
+
       - name: Verify changelog
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
         run: dart run tool/changelog.dart verify
@@ -173,9 +177,18 @@ jobs:
         run: flutter pub get
 
       # Compiles the desktop runners and the native plugin code that only the
-      # tagged release matrix built before; the bundle itself is discarded.
+      # tagged release matrix built before; only the Windows debug bundle is
+      # kept for download.
       - name: Build debug bundle
         run: flutter build ${{ matrix.platform }} --debug
+
+      - name: Upload Windows debug bundle
+        if: matrix.platform == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlClash-windows-debug
+          path: build/windows/x64/runner/Debug
+          if-no-files-found: error
 
   go:
     name: Go core

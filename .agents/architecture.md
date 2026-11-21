@@ -1656,7 +1656,7 @@ rewritten; each owner reads the flag where it would otherwise act:
   decryption page offers no install row, so no CA reaches or leaves the keychain, the Windows root store, the Linux
   anchors and NSS databases, or Android's installer; the read-only trust check and the export still work.
 - Presentation: `AppEnvManager` shows a `SAFE MODE` banner ahead of the channel banner, and `TrayState.safeMode` gives
-  the tray the `status_4` bug icon and a suffixed tooltip; the menu and the macOS traffic title are the normal ones.
+  the tray the `status_4` bug icon and a suffixed tooltip; the menu and the tray speed title are the normal ones.
 
 A new host integration, anything that changes the OS's routes, proxy, DNS, login items, privileges or VPN state, or
 that asks the OS for a permission, a global shortcut or a registration, must consult the flag at its owner in the same way and get a test that overrides `safeModeProvider`.
@@ -2062,7 +2062,9 @@ UTF-8 bytes rather than a `String` so that decoding them stays off the UI isolat
   block rather than inside the call, because tracking runs a nested event loop. Windows owns the icon from a hidden
   top-level window on a `tray` thread, which gets `TaskbarCreated`, resume broadcasts and its retry timer there and
   runs `TrackPopupMenu`; `show` and `hide` call `Shell_NotifyIconW` on the caller's thread so that a hide before
-  `exit` has landed. Linux exports a StatusNotifierItem and its dbusmenu over D-Bus with `ksni`, on a `tray` thread
+  `exit` has landed. Windows draws the speed title into a separate layered, no-activate top-level window anchored
+  left of `TrayNotifyWnd`, kept in place by a one-second timer and hidden while a foreground window covers its
+  monitor. Linux exports a StatusNotifierItem and its dbusmenu over D-Bus with `ksni`, on a `tray` thread
   with a current-thread tokio runtime, so it needs neither GTK nor libappindicator: a left click is
   `TrayIconActivated`, the host shows the menu on a right click, and GNOME shows the item only with the AppIndicator
   extension.

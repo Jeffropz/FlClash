@@ -23,6 +23,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart';
 import 'package:riverpod/riverpod.dart';
+import 'package:rust_api/tray.dart';
 import 'package:yaml/yaml.dart';
 
 import '../helpers/app_paths.dart';
@@ -467,7 +468,7 @@ void main() {
       await setup.setRunning(false);
     });
 
-    testWidgets('the macOS menu bar title keeps traffic coming while hidden', (
+    testWidgets('a tray title keeps traffic coming while hidden', (
       tester,
     ) async {
       final setup = buildScoped();
@@ -481,7 +482,7 @@ void main() {
           .update((state) => state.copyWith(showTrayTitle: true));
       await tester.pump(const Duration(seconds: 2));
 
-      expect(trafficUpdates(), system.isMacOS ? 3 : 0);
+      expect(trafficUpdates(), Tray.instance.capabilities.title ? 3 : 0);
 
       await setup.setRunning(false);
     });

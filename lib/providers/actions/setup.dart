@@ -61,9 +61,9 @@ class SetupAction extends _$SetupAction {
 
   bool get _isTrafficShown =>
       ref.read(appVisibleProvider) ||
-      (system.isMacOS &&
-          !ref.read(safeModeProvider) &&
-          ref.read(appSettingProvider).showTrayTitle);
+      (!ref.read(safeModeProvider) &&
+          ref.read(appSettingProvider).showTrayTitle &&
+          Tray.instance.capabilities.title);
 
   SetupParams get _setupParams => SetupParams(
     selectedMap: ref.read(selectedMapProvider),

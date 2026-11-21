@@ -46,6 +46,8 @@ class _TrayManagerState extends ConsumerState<TrayManager> {
           _requestUpdate();
         }
       });
+    }
+    if (Tray.instance.capabilities.title) {
       ref.listenManual(trayTitleStateProvider, (prev, next) {
         if (prev != next) {
           _reportFailure(

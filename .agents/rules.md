@@ -331,7 +331,7 @@ leaving a repo-wide policy as a comment reaches only the reader of that one file
 - `Tray` (`package:rust_api/tray.dart`) owns call ordering, idempotency, serialization, and unchanged-payload
   suppression. Application code declares desired state through one `Tray.show(TraySpec)` call and must not add
   platform branches to work around ordering. Platform branches in `lib/common/tray.dart` are only for deliberate
-  product differences (macOS speed title and group submenus); query `Tray.instance.capabilities` for ability
+  product differences (speed title and group submenus); query `Tray.instance.capabilities` for ability
   differences.
 - Every native `show` returns whether the tray accepted the payload, and reports `false` instead of showing a broken
   icon. `Tray` caches the payload signature only on `true`, so a rejected `show` is retried by the next update rather

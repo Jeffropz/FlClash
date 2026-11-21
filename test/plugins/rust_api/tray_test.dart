@@ -290,6 +290,13 @@ void main() {
     expect(Tray.instance.isVisible, isFalse);
   });
 
+  test('windows forwards the two-line tray title', () async {
+    await Tray.instance.show(_spec());
+    await Tray.instance.setTitle('1 KB/s\n2 KB/s');
+
+    expect(host.titles, ['1 KB/s\n2 KB/s']);
+  });
+
   test('titles queued behind a stalled call collapse to the newest', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     final gate = Completer<void>();

@@ -118,7 +118,7 @@ class AppTray implements TrayPort {
     required bool showTrayTitle,
     required Traffic traffic,
   }) async {
-    if (_isShutDown || !isMacOS) {
+    if (_isShutDown) {
       return;
     }
     await Tray.instance.setTitle(showTrayTitle ? traffic.trayTitle : '');
@@ -158,18 +158,18 @@ class AppTray implements TrayPort {
         detail: shortcut(HotAction.start),
         onSelected: commonAction.toggleRunning,
       ),
-      if (isMacOS) ...[
+      if (Tray.instance.capabilities.title)
         TrayMenuCheckbox(
           label: appLocalizations.speedStatistics,
           checked: trayState.showTrayTitle,
           onSelected: commonAction.updateSpeedStatistics,
         ),
+      if (isMacOS)
         TrayMenuCheckbox(
           label: appLocalizations.monochromeIcon,
           checked: trayState.monochromeTrayIcon,
           onSelected: commonAction.updateMonochromeTrayIcon,
         ),
-      ],
       const TrayMenuSeparator(),
       for (final mode in Mode.values)
         TrayMenuCheckbox(

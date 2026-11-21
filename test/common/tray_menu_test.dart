@@ -371,39 +371,43 @@ void main() {
     late AppTray windows;
 
     setUp(() {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
       windows = AppTray.forPlatform(isMacOS: false, isWindows: true);
     });
 
-    test('gets a plain icon, no group submenus and no speed toggle', () async {
-      await update(
-        _trayState(
-          isStart: true,
-          groups: [
-            const Group(
-              name: 'Proxy',
-              type: GroupType.Selector,
-              all: [Proxy(name: 'A', type: 'Direct')],
-            ),
-          ],
-        ),
-        on: windows,
-      );
+    test(
+      'gets a plain icon, no group submenus and no monochrome toggle',
+      () async {
+        await update(
+          _trayState(
+            isStart: true,
+            groups: [
+              const Group(
+                name: 'Proxy',
+                type: GroupType.Selector,
+                all: [Proxy(name: 'A', type: 'Direct')],
+              ),
+            ],
+          ),
+          on: windows,
+        );
 
-      expect(showCall()!.image.template, isFalse);
-      expect(
-        _items(showCall()).where((item) => item['type'] == 'submenu'),
-        isEmpty,
-      );
-      expect(
-        _labels(showCall()),
-        isNot(contains(currentAppLocalizations.speedStatistics)),
-      );
-      expect(
-        _labels(showCall()),
-        isNot(contains(currentAppLocalizations.monochromeIcon)),
-      );
-      expect(_labels(showCall()), isNot(contains(HotAction.delayTest.label)));
-    });
+        expect(showCall()!.image.template, isFalse);
+        expect(
+          _items(showCall()).where((item) => item['type'] == 'submenu'),
+          isEmpty,
+        );
+        expect(
+          _labels(showCall()),
+          contains(currentAppLocalizations.speedStatistics),
+        );
+        expect(
+          _labels(showCall()),
+          isNot(contains(currentAppLocalizations.monochromeIcon)),
+        );
+        expect(_labels(showCall()), isNot(contains(HotAction.delayTest.label)));
+      },
+    );
 
     test('joins modifiers with + in the hotkey hints', () async {
       await update(
@@ -421,10 +425,10 @@ void main() {
       );
     });
 
-    test('never pushes a tray title', () async {
-      await windows.updateTitle(showTrayTitle: true, traffic: const Traffic());
+    test('pushes the two-line tray title', () async {
+      await update(_trayState(showTrayTitle: true), on: windows);
 
-      expect(host.titles, isEmpty);
+      expect(host.titles, ['0 B/s\n0 B/s']);
     });
   });
 }

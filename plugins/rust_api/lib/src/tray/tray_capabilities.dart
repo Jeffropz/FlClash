@@ -27,7 +27,7 @@ final class TrayCapabilities {
 
   static const TrayCapabilities windows = TrayCapabilities(
     supported: true,
-    title: false,
+    title: true,
     toolTip: true,
     iconEvents: true,
     menuControl: true,

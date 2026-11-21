@@ -9,33 +9,55 @@ use std::ptr::{null, null_mut};
 use std::sync::{mpsc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use windows_sys::core::PCSTR;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows_sys::Win32::Foundation::{
+    ERROR_SUCCESS, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
+};
 use windows_sys::Win32::Globalization::lstrcmpW;
+use windows_sys::Win32::Graphics::Gdi::{
+    CreateCompatibleDC, CreateDIBSection, CreateFontW, DeleteDC, DeleteObject, DrawTextW, GdiFlush,
+    GetDC, GetMonitorInfoW, MonitorFromWindow, ReleaseDC, SelectObject, SetBkMode, SetTextColor,
+    ValidateRect, AC_SRC_ALPHA, AC_SRC_OVER, ANTIALIASED_QUALITY, BITMAPINFO, BITMAPINFOHEADER,
+    BI_RGB, BLENDFUNCTION, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DIB_RGB_COLORS,
+    DT_NOPREFIX, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, MONITORINFO,
+    MONITOR_DEFAULTTONEAREST, OUT_DEFAULT_PRECIS, TRANSPARENT,
+};
 use windows_sys::Win32::System::LibraryLoader::{
     GetModuleHandleW, GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_SYSTEM32,
 };
+use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
 use windows_sys::Win32::System::SystemInformation::OSVERSIONINFOW;
+use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
     NOTIFYICONDATAW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu,
-    DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics, KillTimer, LoadImageW,
+    DispatchMessageW, FindWindowExW, FindWindowW, GetClassNameW, GetCursorPos, GetForegroundWindow,
+    GetMessageW, GetSystemMetrics, GetWindowRect, IsWindowVisible, KillTimer, LoadImageW,
     PostMessageW, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, SetTimer,
-    TrackPopupMenu, TranslateMessage, HICON, HMENU, IMAGE_ICON, LR_LOADFROMFILE, MF_CHECKED,
-    MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, PBT_APMRESUMEAUTOMATIC,
-    PBT_APMRESUMESUSPEND, SM_CXSMICON, SM_CYSMICON, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD,
-    TPM_RIGHTBUTTON, WM_APP, WM_LBUTTONUP, WM_NULL, WM_POWERBROADCAST, WM_RBUTTONUP,
-    WM_SETTINGCHANGE, WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
+    ShowWindow, TrackPopupMenu, TranslateMessage, UpdateLayeredWindow, HICON, HMENU, IMAGE_ICON,
+    LR_LOADFROMFILE, MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG,
+    PBT_APMRESUMEAUTOMATIC, PBT_APMRESUMESUSPEND, SM_CXSMICON, SM_CYSCREEN, SM_CYSMICON, SW_HIDE,
+    SW_SHOWNOACTIVATE, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, ULW_ALPHA,
+    WM_APP, WM_ERASEBKGND, WM_LBUTTONUP, WM_NULL, WM_PAINT, WM_POWERBROADCAST, WM_RBUTTONUP,
+    WM_SETTINGCHANGE, WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_OVERLAPPED, WS_POPUP,
 };
 
 const WM_TRAY: u32 = WM_APP + 1;
 const WM_OPEN_MENU: u32 = WM_APP + 2;
 const WM_RETRY: u32 = WM_APP + 3;
+const WM_TITLE: u32 = WM_APP + 4;
 const ICON_ID: u32 = 1;
 const RETRY_TIMER: usize = 1;
+const TITLE_TIMER: usize = 2;
 const RETRY_INTERVAL_MS: u32 = 2000;
+const TITLE_INTERVAL_MS: u32 = 1000;
+const TITLE_WIDTH: i32 = 128;
+const TITLE_HEIGHT: i32 = 38;
+const TITLE_GAP: i32 = 6;
+const TITLE_FONT_HEIGHT: i32 = 12;
 // SetPreferredAppMode and FlushMenuThemes, the undocumented uxtheme ordinals
 // Explorer uses for dark Win32 menus, exist from 1903 on.
 const FIRST_DARK_MENU_BUILD: u32 = 18362;
@@ -58,6 +80,7 @@ impl Drop for Icon {
 struct State {
     icon: Option<Icon>,
     tool_tip: String,
+    title: String,
     menu: Vec<TrayItem>,
     // An add the shell timed out on may still have landed, so `hide` deletes
     // whenever one was attempted.
@@ -68,11 +91,13 @@ struct State {
 static STATE: Mutex<State> = Mutex::new(State {
     icon: None,
     tool_tip: String::new(),
+    title: String::new(),
     menu: Vec::new(),
     requested: false,
     visible: false,
 });
 static WINDOW: OnceLock<Option<usize>> = OnceLock::new();
+static TITLE_WINDOW: OnceLock<Option<usize>> = OnceLock::new();
 static TASKBAR_CREATED: OnceLock<u32> = OnceLock::new();
 static FLUSH_MENUS: OnceLock<Option<unsafe extern "system" fn()>> = OnceLock::new();
 
@@ -86,6 +111,7 @@ pub fn show(content: TrayContent) -> bool {
     let mut state = lock();
     state.icon = Some(icon);
     state.tool_tip = content.tool_tip;
+    state.title = content.title;
     state.menu = content.menu;
     state.requested = true;
     let applied =
@@ -95,11 +121,17 @@ pub fn show(content: TrayContent) -> bool {
     } else {
         unsafe { PostMessageW(window, WM_RETRY, 0, 0) };
     }
+    drop(state);
+    unsafe { PostMessageW(window, WM_TITLE, 0, 0) };
     true
 }
 
-pub fn set_title(_title: String) -> bool {
-    false
+pub fn set_title(title: String) -> bool {
+    let Some(window) = existing_window() else {
+        return false;
+    };
+    lock().title = title;
+    unsafe { PostMessageW(window, WM_TITLE, 0, 0) != 0 }
 }
 
 pub fn hide() {
@@ -113,6 +145,8 @@ pub fn hide() {
         unsafe { Shell_NotifyIconW(NIM_DELETE, &data) };
     }
     *state = State::default();
+    drop(state);
+    unsafe { PostMessageW(window, WM_TITLE, 0, 0) };
 }
 
 pub fn open_menu() -> bool {
@@ -163,6 +197,14 @@ fn run_window(ready: mpsc::Sender<Option<usize>>) {
             ..zeroed()
         };
         RegisterClassW(&window_class);
+        let title_class = wide("FlClashTrayTitle");
+        let title_window_class = WNDCLASSW {
+            lpfnWndProc: Some(title_proc),
+            hInstance: instance,
+            lpszClassName: title_class.as_ptr(),
+            ..zeroed()
+        };
+        RegisterClassW(&title_window_class);
         let window = CreateWindowExW(
             0,
             class.as_ptr(),
@@ -178,10 +220,26 @@ fn run_window(ready: mpsc::Sender<Option<usize>>) {
             null(),
         );
         let created = !window.is_null();
+        let title = CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+            title_class.as_ptr(),
+            null(),
+            WS_POPUP,
+            0,
+            0,
+            0,
+            0,
+            null_mut(),
+            null_mut(),
+            instance,
+            null(),
+        );
+        let _ = TITLE_WINDOW.set((!title.is_null()).then_some(title as usize));
         let _ = ready.send(created.then_some(window as usize));
         if !created {
             return;
         }
+        SetTimer(window, TITLE_TIMER, TITLE_INTERVAL_MS, None);
         let mut message: MSG = zeroed();
         while GetMessageW(&mut message, null_mut(), 0, 0) > 0 {
             TranslateMessage(&message);
@@ -209,12 +267,20 @@ unsafe extern "system" fn window_proc(
             popup_menu(window);
             return 0;
         }
+        WM_TITLE => {
+            sync_title();
+            return 0;
+        }
         WM_RETRY => {
             SetTimer(window, RETRY_TIMER, RETRY_INTERVAL_MS, None);
             return 0;
         }
         WM_TIMER if wparam == RETRY_TIMER => {
             restore(window);
+            return 0;
+        }
+        WM_TIMER if wparam == TITLE_TIMER => {
+            sync_title();
             return 0;
         }
         WM_SETTINGCHANGE if is_color_set_change(lparam) => {
@@ -273,6 +339,342 @@ fn restore(window: HWND) {
     } else {
         unsafe { SetTimer(window, RETRY_TIMER, RETRY_INTERVAL_MS, None) };
     }
+}
+
+fn title_window() -> Option<HWND> {
+    TITLE_WINDOW
+        .get()
+        .copied()
+        .flatten()
+        .map(|window| window as HWND)
+}
+
+fn sync_title() {
+    let Some(window) = title_window() else {
+        return;
+    };
+    let title = {
+        let state = lock();
+        if state.visible {
+            state.title.clone()
+        } else {
+            String::new()
+        }
+    };
+    let Some(layout) = (!title.is_empty()).then(title_layout).flatten() else {
+        unsafe { ShowWindow(window, SW_HIDE) };
+        return;
+    };
+    if render_title(window, &title, &layout) {
+        if unsafe { IsWindowVisible(window) } == 0 {
+            unsafe { ShowWindow(window, SW_SHOWNOACTIVATE) };
+        }
+    } else {
+        unsafe { ShowWindow(window, SW_HIDE) };
+    }
+}
+
+struct TitleLayout {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    dpi: u32,
+}
+
+fn title_layout() -> Option<TitleLayout> {
+    if foreground_covers_monitor() {
+        return None;
+    }
+    let taskbar = unsafe { FindWindowW(wide("Shell_TrayWnd").as_ptr(), null()) };
+    if taskbar.is_null() {
+        return None;
+    }
+    let mut taskbar_rect: RECT = unsafe { zeroed() };
+    if unsafe { GetWindowRect(taskbar, &mut taskbar_rect) } == 0 {
+        return None;
+    }
+    let taskbar_width = taskbar_rect.right - taskbar_rect.left;
+    let taskbar_height = taskbar_rect.bottom - taskbar_rect.top;
+    if taskbar_width <= taskbar_height || taskbar_height < 16 {
+        return None;
+    }
+    let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+    let visible_height = taskbar_rect.bottom.min(screen_height) - taskbar_rect.top.max(0);
+    if visible_height < 8 {
+        return None;
+    }
+    let dpi = unsafe { GetDpiForWindow(taskbar) };
+    let dpi = if dpi == 0 { 96 } else { dpi };
+    let width = TITLE_WIDTH * dpi as i32 / 96;
+    let height = TITLE_HEIGHT * dpi as i32 / 96;
+    let gap = TITLE_GAP * dpi as i32 / 96;
+    let anchor = unsafe {
+        let tray = FindWindowExW(taskbar, null_mut(), wide("TrayNotifyWnd").as_ptr(), null());
+        let mut tray_rect: RECT = zeroed();
+        if !tray.is_null() && GetWindowRect(tray, &mut tray_rect) != 0 {
+            tray_rect.left
+        } else {
+            taskbar_rect.right
+        }
+    };
+    let x = anchor - gap - width;
+    if x < taskbar_rect.left {
+        return None;
+    }
+    Some(TitleLayout {
+        x,
+        y: taskbar_rect.top + (taskbar_height - height) / 2,
+        width,
+        height,
+        dpi,
+    })
+}
+
+fn foreground_covers_monitor() -> bool {
+    unsafe {
+        let foreground = GetForegroundWindow();
+        if foreground.is_null() || is_shell_window(foreground) {
+            return false;
+        }
+        let monitor = MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST);
+        if monitor.is_null() {
+            return false;
+        }
+        let mut info: MONITORINFO = zeroed();
+        info.cbSize = size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(monitor, &mut info) == 0 {
+            return false;
+        }
+        let mut rect: RECT = zeroed();
+        if GetWindowRect(foreground, &mut rect) == 0 {
+            return false;
+        }
+        rect.left <= info.rcMonitor.left
+            && rect.top <= info.rcMonitor.top
+            && rect.right >= info.rcMonitor.right
+            && rect.bottom >= info.rcMonitor.bottom
+    }
+}
+
+fn is_shell_window(window: HWND) -> bool {
+    let mut class = [0u16; 64];
+    let len = unsafe { GetClassNameW(window, class.as_mut_ptr(), class.len() as i32) };
+    if len <= 0 {
+        return false;
+    }
+    let class = String::from_utf16_lossy(&class[..len as usize]);
+    matches!(
+        class.as_str(),
+        "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd"
+    )
+}
+
+fn render_title(window: HWND, title: &str, layout: &TitleLayout) -> bool {
+    let light = taskbar_is_light();
+    let screen = unsafe { GetDC(null_mut()) };
+    if screen.is_null() {
+        return false;
+    }
+    let memory = unsafe { CreateCompatibleDC(screen) };
+    if memory.is_null() {
+        unsafe { ReleaseDC(null_mut(), screen) };
+        return false;
+    }
+    let mut info: BITMAPINFO = unsafe { zeroed() };
+    info.bmiHeader = unsafe {
+        BITMAPINFOHEADER {
+            biSize: size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: layout.width,
+            biHeight: -layout.height,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB,
+            ..zeroed()
+        }
+    };
+    let mut bits = null_mut();
+    let bitmap =
+        unsafe { CreateDIBSection(memory, &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0) };
+    if bitmap.is_null() || bits.is_null() {
+        unsafe {
+            DeleteDC(memory);
+            ReleaseDC(null_mut(), screen);
+        }
+        return false;
+    }
+    let previous = unsafe { SelectObject(memory, bitmap) };
+    let pixels = unsafe {
+        std::slice::from_raw_parts_mut(
+            bits.cast::<u32>(),
+            layout.width as usize * layout.height as usize,
+        )
+    };
+    pixels.fill(if light { 0x00ff_ffff } else { 0 });
+    let face = wide("Segoe UI");
+    let font = unsafe {
+        CreateFontW(
+            -(TITLE_FONT_HEIGHT * layout.dpi as i32 / 96),
+            0,
+            0,
+            0,
+            600,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET as u32,
+            OUT_DEFAULT_PRECIS as u32,
+            CLIP_DEFAULT_PRECIS as u32,
+            ANTIALIASED_QUALITY as u32,
+            (DEFAULT_PITCH | FF_DONTCARE) as u32,
+            face.as_ptr(),
+        )
+    };
+    let old_font = if font.is_null() {
+        null_mut()
+    } else {
+        unsafe { SelectObject(memory, font) }
+    };
+    unsafe {
+        SetBkMode(memory, TRANSPARENT as i32);
+        SetTextColor(memory, if light { 0 } else { 0x00ff_ffff });
+    }
+    let lines = title_lines(title);
+    let line_height = layout.height / 2;
+    for (index, line) in lines.iter().enumerate() {
+        let mut rect = RECT {
+            left: 0,
+            top: index as i32 * line_height,
+            right: layout.width,
+            bottom: (index as i32 + 1) * line_height,
+        };
+        let text: Vec<u16> = line.encode_utf16().collect();
+        unsafe {
+            DrawTextW(
+                memory,
+                text.as_ptr(),
+                text.len() as i32,
+                &mut rect,
+                DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX,
+            );
+        }
+    }
+    if !font.is_null() {
+        unsafe {
+            SelectObject(memory, old_font);
+            DeleteObject(font);
+        }
+    }
+    unsafe { GdiFlush() };
+    // GDI leaves the alpha byte untouched in a 32-bit DIB, so derive it from
+    // the glyph coverage and write premultiplied pixels.
+    for pixel in pixels.iter_mut() {
+        let [blue, green, red, _] = pixel.to_le_bytes();
+        let coverage = red.max(green).max(blue);
+        *pixel = if light {
+            let alpha = 255 - coverage;
+            (alpha as u32) << 24
+        } else {
+            let alpha = coverage as u32;
+            (alpha << 24) | (alpha << 16) | (alpha << 8) | alpha
+        };
+    }
+    let blend = BLENDFUNCTION {
+        BlendOp: AC_SRC_OVER as u8,
+        BlendFlags: 0,
+        SourceConstantAlpha: 255,
+        AlphaFormat: AC_SRC_ALPHA as u8,
+    };
+    let destination = POINT {
+        x: layout.x,
+        y: layout.y,
+    };
+    let size = SIZE {
+        cx: layout.width,
+        cy: layout.height,
+    };
+    let source = POINT { x: 0, y: 0 };
+    let applied = unsafe {
+        UpdateLayeredWindow(
+            window,
+            screen,
+            &destination,
+            &size,
+            memory,
+            &source,
+            0,
+            &blend,
+            ULW_ALPHA,
+        ) != 0
+    };
+    unsafe {
+        SelectObject(memory, previous);
+        DeleteObject(bitmap);
+        DeleteDC(memory);
+        ReleaseDC(null_mut(), screen);
+    }
+    applied
+}
+
+fn title_lines(title: &str) -> [String; 2] {
+    let mut lines = title.lines();
+    let up = with_arrow('↑', lines.next().unwrap_or_default());
+    let down = with_arrow('↓', lines.next().unwrap_or_default());
+    [up, down]
+}
+
+fn with_arrow(arrow: char, line: &str) -> String {
+    let line = line.trim();
+    if line.starts_with('↑') || line.starts_with('↓') {
+        line.to_owned()
+    } else {
+        format!("{arrow} {line}")
+    }
+}
+
+// The taskbar follows SystemUsesLightTheme; the app theme can differ.
+fn taskbar_is_light() -> bool {
+    let path = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
+    let name = wide("SystemUsesLightTheme");
+    let mut value: u32 = 0;
+    let mut size = size_of::<u32>() as u32;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            path.as_ptr(),
+            name.as_ptr(),
+            RRF_RT_REG_DWORD,
+            null_mut(),
+            (&mut value as *mut u32).cast(),
+            &mut size,
+        )
+    };
+    status == ERROR_SUCCESS && value != 0
+}
+
+unsafe extern "system" fn title_proc(
+    window: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    match message {
+        WM_LBUTTONUP => {
+            emit(TraySignalKind::IconActivated, 0);
+            return 0;
+        }
+        WM_RBUTTONUP => {
+            emit(TraySignalKind::MenuRequested, 0);
+            return 0;
+        }
+        WM_ERASEBKGND => return 1,
+        WM_PAINT => {
+            ValidateRect(window, null());
+            return 0;
+        }
+        _ => {}
+    }
+    DefWindowProcW(window, message, wparam, lparam)
 }
 
 fn load_icon(path: &str) -> Option<Icon> {
@@ -424,5 +826,25 @@ mod tests {
     #[test]
     fn an_ampersand_is_shown_rather_than_read_as_a_mnemonic() {
         assert_eq!(menu_text(&item("R&D", Some("A&B"))), "R&&D\tA&&B");
+    }
+
+    #[test]
+    fn the_title_stays_two_lines_with_direction_arrows() {
+        assert_eq!(
+            title_lines("1 KB/s\n2 KB/s"),
+            ["↑ 1 KB/s".to_owned(), "↓ 2 KB/s".to_owned()]
+        );
+        assert_eq!(
+            title_lines("1 KB/s"),
+            ["↑ 1 KB/s".to_owned(), "↓ ".to_owned()]
+        );
+    }
+
+    #[test]
+    fn an_existing_direction_arrow_is_not_doubled() {
+        assert_eq!(
+            title_lines("↑ 1 KB/s\n↓ 2 KB/s"),
+            ["↑ 1 KB/s".to_owned(), "↓ 2 KB/s".to_owned()]
+        );
     }
 }

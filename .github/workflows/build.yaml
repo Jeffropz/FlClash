@@ -72,14 +72,9 @@ jobs:
         run: |
           yq -i '.hooks.user_defines.setup.build_assets = false' pubspec.yaml
 
-      - name: Fetch upstream release tags
-        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && github.repository != 'chen08209/FlClash'
-        # The checkout token is scoped to the fork, so fetch the public
-        # upstream anonymously.
-        run: git -c 'http.https://github.com/.extraheader=' fetch --tags https://github.com/chen08209/FlClash.git
-
+      # Forks do not carry the release tags the changelog check derives from.
       - name: Verify changelog
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        if: github.repository == 'chen08209/FlClash' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
         run: dart run tool/changelog.dart verify
 
       - name: Run tests

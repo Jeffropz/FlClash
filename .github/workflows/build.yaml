@@ -74,7 +74,9 @@ jobs:
 
       - name: Fetch upstream release tags
         if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && github.repository != 'chen08209/FlClash'
-        run: git fetch --tags https://github.com/chen08209/FlClash.git
+        # The checkout token is scoped to the fork, so fetch the public
+        # upstream anonymously.
+        run: git -c 'http.https://github.com/.extraheader=' fetch --tags https://github.com/chen08209/FlClash.git
 
       - name: Verify changelog
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')

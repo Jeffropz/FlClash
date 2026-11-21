@@ -179,17 +179,22 @@ jobs:
         run: flutter pub get
 
       # Compiles the desktop runners and the native plugin code that only the
-      # tagged release matrix built before; only the Windows debug bundle is
-      # kept for download.
+      # tagged release matrix built before. Windows gets a release bundle so it
+      # runs without the Visual Studio debug CRT.
       - name: Build debug bundle
+        if: matrix.platform != 'windows'
         run: flutter build ${{ matrix.platform }} --debug
 
-      - name: Upload Windows debug bundle
+      - name: Build Windows release bundle
+        if: matrix.platform == 'windows'
+        run: flutter build windows --release
+
+      - name: Upload Windows release bundle
         if: matrix.platform == 'windows'
         uses: actions/upload-artifact@v4
         with:
-          name: FlClash-windows-debug
-          path: build/windows/x64/runner/Debug
+          name: FlClash-windows-release
+          path: build/windows/x64/runner/Release
           if-no-files-found: error
 
   go:

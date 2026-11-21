@@ -33,13 +33,13 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu,
     DispatchMessageW, FindWindowExW, FindWindowW, GetCursorPos, GetMessageW, GetSystemMetrics,
-    GetWindowRect, IsWindowVisible, KillTimer, LoadImageW, PostMessageW, RegisterClassW,
+    GetWindowRect, IsChild, IsWindowVisible, KillTimer, LoadImageW, PostMessageW, RegisterClassW,
     RegisterWindowMessageW, SetForegroundWindow, SetTimer, ShowWindow, TrackPopupMenu,
-    TranslateMessage, UpdateLayeredWindow, HICON, HMENU, IMAGE_ICON, LR_LOADFROMFILE, MF_CHECKED,
-    MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, PBT_APMRESUMEAUTOMATIC,
-    PBT_APMRESUMESUSPEND, SM_CXSMICON, SM_CYSCREEN, SM_CYSMICON, SW_HIDE, SW_SHOWNOACTIVATE,
-    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, ULW_ALPHA, WM_APP,
-    WM_ERASEBKGND, WM_LBUTTONUP, WM_NULL, WM_PAINT, WM_POWERBROADCAST, WM_RBUTTONUP,
+    TranslateMessage, UpdateLayeredWindow, WindowFromPoint, HICON, HMENU, IMAGE_ICON,
+    LR_LOADFROMFILE, MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG,
+    PBT_APMRESUMEAUTOMATIC, PBT_APMRESUMESUSPEND, SM_CXSMICON, SM_CYSCREEN, SM_CYSMICON, SW_HIDE,
+    SW_SHOWNOACTIVATE, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, ULW_ALPHA,
+    WM_APP, WM_ERASEBKGND, WM_LBUTTONUP, WM_NULL, WM_PAINT, WM_POWERBROADCAST, WM_RBUTTONUP,
     WM_SETTINGCHANGE, WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     WS_EX_TOPMOST, WS_OVERLAPPED, WS_POPUP,
 };
@@ -373,6 +373,18 @@ fn sync_title() {
     }
 }
 
+fn taskbar_is_visible(taskbar: HWND, rect: &RECT) -> bool {
+    // A fullscreen window covers the taskbar while Shell_TrayWnd keeps its
+    // rect, and the title itself may cover the centre of a narrow taskbar.
+    let y = (rect.top + rect.bottom) / 2;
+    [rect.left + 1, (rect.left + rect.right) / 2, rect.right - 1]
+        .into_iter()
+        .any(|x| unsafe {
+            let hit = WindowFromPoint(POINT { x, y });
+            hit == taskbar || IsChild(taskbar, hit) != 0
+        })
+}
+
 struct TitleLayout {
     x: i32,
     y: i32,
@@ -397,7 +409,7 @@ fn title_layout() -> Option<TitleLayout> {
     }
     let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
     let visible_height = taskbar_rect.bottom.min(screen_height) - taskbar_rect.top.max(0);
-    if visible_height < 8 {
+    if visible_height < 8 || !taskbar_is_visible(taskbar, &taskbar_rect) {
         return None;
     }
     let dpi = unsafe { GetDpiForWindow(taskbar) };
